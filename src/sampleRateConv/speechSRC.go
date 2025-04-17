@@ -14,6 +14,7 @@ Plot time and frequency domains of the speech.  Hear the audio from WAV files.
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"html/template"
 	"log"
@@ -25,6 +26,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/go-audio/audio"
 	"github.com/go-audio/wav"
@@ -199,6 +201,46 @@ func newSrc(r *http.Request, plot *PlotT) (*Src, error) {
 		convSampleRate: convSampleRate,
 	}
 	src.bounds = make([]Bound, 0)
+
+	// Get the low pass filters
+	src.lpf = make([][]float64, nprimes)
+	files, err := os.ReadDir(dataDir)
+	if err != nil {
+		fmt.Printf("ReadDir for %s error: %v\n", dataDir, err)
+		return nil, fmt.Errorf("ReadDir for %s error %v", dataDir, err.Error())
+	}
+	n := 0
+	for _, dirEntry := range files {
+		name := dirEntry.Name()
+		base := filepath.Base(name)
+		if strings.Contains(base, "lpf") {
+			f, err := os.Open(path.Join(dataDir, name))
+			if err != nil {
+				fmt.Printf("Open %s error: %v\n", name, err)
+				return nil, fmt.Errorf("file Open %s error: %v", name, err.Error())
+			}
+			defer f.Close()
+			// lpf_3_51.txt, pi/3, 51 = order, length = order+1
+			items := strings.Split(base, "_")
+			fcutoff, _ := strconv.Atoi(items[1])
+			forder, _ := strconv.Atoi(items[2])
+			src.lpf[n] = make([]float64, forder+1)
+			DI2lpf[fcutoff] = n
+			scanner := bufio.NewScanner(f)
+			k := 0
+			var coeff float64
+			for scanner.Scan() {
+				value := scanner.Text()
+				if coeff, err = strconv.ParseFloat(value, 64); err != nil {
+					fmt.Printf("String %s conversion to float error: %v\n", value, err)
+					continue
+				}
+				src.lpf[n][k] = coeff
+				k++
+			}
+			n++
+		}
+	}
 
 	// Determine if Sampling Rate Converter is wanted
 	smpRateConv := r.FormValue("src")
@@ -388,6 +430,7 @@ func (src *Src) findFactors() error {
 	src.deci = make([]int, 0)
 
 	// make I and D relatively prime by removing common factors
+
 	prevI := 0
 	for prevI != I {
 		prevI = I
@@ -401,35 +444,43 @@ func (src *Src) findFactors() error {
 	}
 
 	// loop over primes and factor I and D until the quotient is one
-	quo := I
-	for quo != 1 {
-		found := 0
-		for _, pr := range primes {
-			if quo%pr == 0 {
-				src.inter = append(src.inter, pr)
-				quo /= pr
-				found++
+	if I == 1 {
+		src.inter = append(src.inter, 1)
+	} else {
+		quo := I
+		for quo != 1 {
+			found := 0
+			for _, pr := range primes {
+				if quo%pr == 0 {
+					src.inter = append(src.inter, pr)
+					quo /= pr
+					found++
+					break
+				}
+			}
+			if found == 0 {
 				break
 			}
-		}
-		if found == 0 {
-			break
 		}
 	}
 
-	quo = D
-	for quo != 1 {
-		found := 0
-		for _, pr := range primes {
-			if quo%pr == 0 {
-				src.deci = append(src.deci, pr)
-				quo /= pr
-				found++
+	if D == 1 {
+		src.deci = append(src.deci, 1)
+	} else {
+		quo := D
+		for quo != 1 {
+			found := 0
+			for _, pr := range primes {
+				if quo%pr == 0 {
+					src.deci = append(src.deci, pr)
+					quo /= pr
+					found++
+					break
+				}
+			}
+			if found == 0 {
 				break
 			}
-		}
-		if found == 0 {
-			break
 		}
 	}
 
@@ -450,8 +501,8 @@ func (src *Src) findFactors() error {
 
 	// find storage factor sf that is the amount of memory needed for
 	// storing the stages input and output
-	src.sf = 1.0
-	max := 0.0
+	src.sf = float64(src.nsamples)
+	max := float64(src.nsamples)
 	for i, k := range src.inter {
 		src.sf *= float64(k) / float64(src.deci[i])
 		if src.sf > max {
@@ -516,10 +567,7 @@ func (src *Src) convertSampleRate() error {
 		// decimator (D) and interpolator (I) factors for this stage
 		D := src.deci[stg]
 		I := src.inter[stg]
-		di := D
-		if I > D {
-			di = I
-		}
+		di := max(D, I)
 		h := src.lpf[DI2lpf[di]]
 		// loop over samples
 		smp := 0
@@ -660,6 +708,7 @@ func handleTestingSrc(w http.ResponseWriter, r *http.Request) {
 	}
 	src.speech = bufInt.AsFloatBuffer().Data
 	src.nsamples = nsamples
+	src.convSpeech = make([]float64, int(float64(src.nsamples)*float64(src.upsample)/float64(src.downsample)))
 
 	// Determine if Sampling Rate Converter processing is wanted
 	sampleRateConvert := r.FormValue("src")
