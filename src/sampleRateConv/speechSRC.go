@@ -85,7 +85,6 @@ type Src struct {
 	sf               float64      // storage factor
 	lpf              [][]float64  // low pass filters
 	file             string
-	silence          bool           // mute the audio if no speech
 	wordsOnly        bool           // check for presence of words in the audio
 	plot             *PlotT         // data to be distributed in the HTML template
 	Endpoints                       // embedded struct
@@ -196,9 +195,10 @@ func newSrc(r *http.Request, plot *PlotT) (*Src, error) {
 		fftSize:        fftSize,
 		fftWindow:      fftWindow,
 		plot:           plot,
-		silence:        true,
 		wordsOnly:      wordsOnly,
 		convSampleRate: convSampleRate,
+		upsample:       1,
+		downsample:     1,
 	}
 	src.bounds = make([]Bound, 0)
 
@@ -379,7 +379,7 @@ func (src *Src) findWords(filename string) error {
 	// The number of samples in the audio level integration window.
 	// Determines when the word and message ends
 	// Convert wordWindow to ms
-	win := int(float64(src.wordWindow) * .001 / (1.0 / float64(sampleRate)))
+	win := int(float64(src.wordWindow) * .001 / (1.0 / float64(sampleRate*src.upsample/src.downsample)))
 	// Minimum audio integration to determine when word begins and ends
 	levelSum := float64(win) * avg
 	buf := make([]float64, win)
@@ -605,7 +605,7 @@ func (src *Src) convertSampleRate() error {
 	}
 	defer outF.Close()
 	// create wav.Encoder
-	enc := wav.NewEncoder(outF, sampleRate, bitDepth, 1, 1)
+	enc := wav.NewEncoder(outF, sampleRate*src.upsample/src.downsample, bitDepth, 1, 1)
 
 	// create audio.FloatBuffer
 	float64Buf := &audio.FloatBuffer{Data: src.convSpeech, Format: &audio.Format{NumChannels: 1, SampleRate: sampleRate}}
@@ -828,7 +828,7 @@ func (src *Src) processTimeDomain(filename string) error {
 	// time starts at 0 and ends at #samples*sampling period
 	endpoints.xmin = 0.0
 	// #samples*sampling period, sampling period = 1/sampleRate
-	endpoints.xmax = float64(src.nsamples) / float64(sampleRate)
+	endpoints.xmax = float64(src.nsamples) / float64(sampleRate*src.upsample/src.downsample)
 
 	// EP means endpoints
 	lenEPx := endpoints.xmax - endpoints.xmin
@@ -848,7 +848,7 @@ func (src *Src) processTimeDomain(filename string) error {
 	// Store the amplitude in the plot Grid
 	for n := 1; n < src.nsamples; n++ {
 		// Current time
-		currTime := float64(n) / float64(sampleRate)
+		currTime := float64(n) / float64(sampleRate*src.upsample/src.downsample)
 
 		// This current cell location (row,col) is on the line (visible)
 		row := int((endpoints.ymax-data[n])*yscale + .5)
@@ -1041,8 +1041,8 @@ func (src *Src) processSpectrogram(filename, fftWindow string, fftSize int) erro
 	}
 
 	// Construct x-axis labels
-	incr := (endpoints.xmax - endpoints.xmin) / ((xlabels - 1) * sampleRate)
-	x := endpoints.xmin / sampleRate
+	incr := (endpoints.xmax - endpoints.xmin) / float64((xlabels - 1) * (sampleRate*src.upsample/src.downsample))
+	x := endpoints.xmin / float64(sampleRate*src.upsample/src.downsample)
 	// First label is empty for alignment purposes
 	for i := range src.plot.Xlabel {
 		src.plot.Xlabel[i] = fmt.Sprintf("%.2f", x)
@@ -1051,7 +1051,7 @@ func (src *Src) processSpectrogram(filename, fftWindow string, fftSize int) erro
 
 	// Apply the  sampling rate in Hz to the y-axis using a scale factor
 	// Convert the fft size to sampleRate/2, the Nyquist critical frequency
-	sf := 0.5 * sampleRate / endpoints.ymax
+	sf := 0.5 * float64(sampleRate*src.upsample/src.downsample) / endpoints.ymax
 
 	// Construct y-axis labels
 	incr = (endpoints.ymax - endpoints.ymin) / (ylabels - 1)
