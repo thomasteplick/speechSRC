@@ -276,14 +276,15 @@
 								<option value="256" selected>256</option>
 							</select>
 							<hr />
-							<h3>LPC Sampling Rate Conversion Parameters</h3>
+							<h3>Sampling Rate Conversion Parameters</h3>
 							<p>
 								Enter the Upsample L, and Downsample D as integers.  Alternatively,
 								enter the Sample Rate Factor as a fixed-point number with two decimal
 								places.  This will be converted to L and D.  L and D should be relatively
 								prime.  The L and D will be factored into prime numbers. The factors
 								will form stages of upsample/downsample sampling rate converters. 
-								This forms the multistage SRC.
+								This forms the multistage SRC.  Choose wheter to configure the stages
+								in ascending or descending order of the upsample and downsample factors.
 							</p>
 							<label for="upsample" class="srcparam">Upsample:</label>
 							<input type="number" min="1" max="100" name="upsample" id="upsample" />
@@ -291,6 +292,24 @@
 							<input type="number" min="1" max="100" name="downsample" id="downsample" />
 							<label for="sampleratefactor" class="srcparam">Sample Rate Factor:</label>
 							<input type="number" min=".01" max="100" step=".01" name="sampleratefactor" id="sampleratefactor" />
+							<h4>Stage Order</h4>
+							<span>
+								Upsample:
+								<input type="radio" name="uporder" value="ascending" id="uporderascending" />
+								<label for="uporderascending">ascending</label>
+								<input type="radio" name="uporder" value="descending" id="uporderdescending" selected />
+								<label for="uporderdescending">descending</label>
+								Downsample:
+								<input type="radio" name="\downorder" value="ascending" id="downorderascending" selected/>
+								<label for="downorderascending">ascending</label>
+								<input type="radio" name="downorder" value="descending" id="downorderdescending" />
+								<label for="downorderdescending">descending</label>
+							</span>
+							<br />
+							<textarea name="stageorder" id="stageorder" readonly>
+								{{.UpsampleOrder}}
+								{{.DownsampleOrder}}
+							</textarea>
 							<br />
 						</div>
 						<input type="submit" value="Submit" />

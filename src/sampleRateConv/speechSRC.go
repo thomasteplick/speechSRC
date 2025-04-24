@@ -54,11 +54,13 @@ const (
 
 // Type to contain all the HTML template actions
 type PlotT struct {
-	Grid   []string // plotting grid
-	Status string   // status of the plot
-	Xlabel []string // x-axis labels
-	Ylabel []string // y-axis labels
-	Domain string   // plot time or spectrogra domain
+	Grid            []string // plotting grid
+	Status          string   // status of the plot
+	Xlabel          []string // x-axis labels
+	Ylabel          []string // y-axis labels
+	Domain          string   // plot time or spectrogra domain
+	UpsampleOrder   string   // upsample stage order
+	DownsampleOrder string   // downsample stage order
 }
 
 // Type to hold the minimum and maximum data values
@@ -81,7 +83,6 @@ type Src struct {
 	deci             []int        // decimator values for each stage
 	inter            []int        // interpolator values for each stage
 	stages           int          // number of I/D stages
-	srf              float64      // sample rate factor
 	sf               float64      // storage factor
 	lpf              [][]float64  // low pass filters
 	file             string
@@ -100,6 +101,8 @@ type Src struct {
 	convSpeech       []float64      // sample rate converted speech
 	convSampleRate   bool           // run sample rate conversion
 	sampleRateFactor float64        //  decimal 2-places for I/D
+	uporder          string         // upsampling stage order
+	downorder        string         // downsampling stage order
 }
 
 // Window function type
@@ -222,9 +225,18 @@ func newSrc(r *http.Request, plot *PlotT) (*Src, error) {
 			defer f.Close()
 			// lpf_3_51.txt, pi/3, 51 = order, length = order+1
 			items := strings.Split(base, "_")
-			fcutoff, _ := strconv.Atoi(items[1])
-			forder, _ := strconv.Atoi(items[2])
-			src.lpf[n] = make([]float64, forder+1)
+			fcutoff, err := strconv.Atoi(items[1])
+			if err != nil {
+				fmt.Printf("fcutoff int conversion error: %v\n", err.Error())
+				return nil, fmt.Errorf("fcutoff int conversion error: %v", err.Error())
+			}
+			order, err := strconv.Atoi(strings.Split(items[2], ".")[0])
+			if err != nil {
+				fmt.Printf("order int conversion error: %v\n", err.Error())
+				return nil, fmt.Errorf("order int conversion error: %v", err.Error())
+			}
+			src.lpf[n] = make([]float64, order)
+			fmt.Printf("lpf[%d], cutoff %d,  order %d, len %d\n", n, fcutoff, order, len(src.lpf[n]))
 			DI2lpf[fcutoff] = n
 			scanner := bufio.NewScanner(f)
 			k := 0
@@ -238,6 +250,12 @@ func newSrc(r *http.Request, plot *PlotT) (*Src, error) {
 				src.lpf[n][k] = coeff
 				k++
 			}
+			if err = scanner.Err(); err != nil {
+				fmt.Printf("lpf[%d] scanner error: %v\n", n, err.Error())
+				return nil, fmt.Errorf("lpf[%d] scanner error: %v", n, err.Error())
+			}
+			last := len(src.lpf[n]) - 1
+			fmt.Printf("h[0] = %f, h[%d] = %f\n", src.lpf[n][0], last, src.lpf[n][last])
 			n++
 		}
 	}
@@ -281,6 +299,11 @@ func newSrc(r *http.Request, plot *PlotT) (*Src, error) {
 			src.downsample = 0
 		}
 		src.file = filepath.Join(dataDir, speechTestWav)
+
+		// Determine stage order for upsample and downsample
+		src.uporder = r.FormValue("uporder")
+		src.downorder = r.FormValue("downorder")
+
 	}
 	return &src, nil
 }
@@ -361,13 +384,13 @@ func (src *Src) findWords(filename string) error {
 		sum   float64 = 0.0
 		k     int     = 0
 		j     int     = 0
-		L     int     = src.nsamples
+		L     int     = src.nsamples * src.upsample / src.downsample
 		max   float64 = 0.0
 		avg   float64 = 0.0
 	)
 
 	// Find the maximum and normalize the data
-	for i := 0; i < L; i++ {
+	for i := range L {
 		new = math.Abs(data[i])
 		avg += new
 		if new > max {
@@ -420,6 +443,51 @@ func (src *Src) findWords(filename string) error {
 	return nil
 }
 
+// orderStages places the upsample and downsample factors in ascending or descending order
+func (src *Src) orderStages() error {
+	// order the interpolator (upsample) factors
+	if src.uporder == "ascending" {
+		for i := 0; i < src.stages-1; i++ {
+			for j := src.stages - 1; j > i; j-- {
+				if src.inter[j] < src.inter[j-1] {
+					src.inter[j], src.inter[j-1] = src.inter[j-1], src.inter[j]
+				}
+			}
+		}
+		// descending order
+	} else {
+		for i := 0; i < src.stages-1; i++ {
+			for j := src.stages - 1; j > i; j-- {
+				if src.inter[j] > src.inter[j-1] {
+					src.inter[j], src.inter[j-1] = src.inter[j-1], src.inter[j]
+				}
+			}
+		}
+	}
+
+	// order the decimator (downsample) factors
+	if src.uporder == "ascending" {
+		for i := 0; i < src.stages-1; i++ {
+			for j := src.stages - 1; j > i; j-- {
+				if src.deci[j] < src.deci[j-1] {
+					src.deci[j], src.deci[j-1] = src.deci[j-1], src.deci[j]
+				}
+			}
+		}
+		// descending order
+	} else {
+		for i := 0; i < src.stages-1; i++ {
+			for j := src.stages - 1; j > i; j-- {
+				if src.deci[j] > src.deci[j-1] {
+					src.deci[j], src.deci[j-1] = src.deci[j-1], src.deci[j]
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 // findFactors factors I and D and create each stage's up/down converter ratios
 func (src *Src) findFactors() error {
 	// factor upsample and downsample into primes and I/D for each stage
@@ -430,7 +498,6 @@ func (src *Src) findFactors() error {
 	src.deci = make([]int, 0)
 
 	// make I and D relatively prime by removing common factors
-
 	prevI := 0
 	for prevI != I {
 		prevI = I
@@ -490,6 +557,7 @@ func (src *Src) findFactors() error {
 
 	// find the number of stages
 	src.stages = max(len(src.inter), len(src.deci))
+	fmt.Printf("number of stages = %d\n", src.stages)
 
 	// pad deci or inter with ones to make them the same length
 	for len(src.deci) < src.stages {
@@ -510,13 +578,14 @@ func (src *Src) findFactors() error {
 		}
 	}
 	src.sf = max
+	fmt.Printf("storage factor = %.3f\n", src.sf)
 
 	return nil
 }
 
 // srf2ID converts the sampling rate factor into the I and D of the multistage SRC
 func (src *Src) srf2ID() error {
-	k := src.srf
+	k := src.sampleRateFactor
 	const N = 100
 	const eps = 0.1
 	for i := 1; i <= N; i++ {
@@ -524,6 +593,7 @@ func (src *Src) srf2ID() error {
 		if tmp-math.Floor(tmp) < eps {
 			src.upsample = int(tmp)
 			src.downsample = i
+			fmt.Printf("sampleRateFactor = %.3f, upsample = %d, downsample = %d\n", src.sampleRateFactor, src.upsample, src.downsample)
 			return nil
 		}
 	}
@@ -550,9 +620,18 @@ func (src *Src) convertSampleRate() error {
 		return fmt.Errorf("findFactors error: %v", err.Error())
 	}
 
+	// order the upsample/downsample stages
+	if err = src.orderStages(); err != nil {
+		fmt.Printf("findFactors error: %v\n", err.Error())
+		return fmt.Errorf("orderStagew error: %v", err.Error())
+	}
+
+	fmt.Printf("inter = %v, deci = %v\n", src.inter, src.deci)
+
 	// allocate src.y[i] = src.storageFactor*src.nsamples
-	src.y[0] = make([]float64, int(math.Ceil(float64(src.nsamples)*src.sf)))
-	src.y[1] = make([]float64, int(math.Ceil(float64(src.nsamples)*src.sf)))
+	src.y[0] = make([]float64, int(math.Ceil(src.sf)))
+	src.y[1] = make([]float64, int(math.Ceil(src.sf)))
+	src.convSpeech = make([]float64, src.nsamples*src.upsample/src.downsample)
 
 	// copy src.speech to src.y[0]
 	// loop over SRC stages
@@ -568,9 +647,15 @@ func (src *Src) convertSampleRate() error {
 		D := src.deci[stg]
 		I := src.inter[stg]
 		di := max(D, I)
-		h := src.lpf[DI2lpf[di]]
-		// loop over samples
-		smp := 0
+		var h []float64
+		if di == 1 {
+			h = []float64{1.0}
+		} else {
+			h = src.lpf[DI2lpf[di]]
+		}
+		fmt.Printf("stage %d cutoff frequency = pi/%d len(h) %d\n", stg, di, len(h))
+		// loop over samples, start at sample len(h)-1 to avoid partial sums with zero inputs
+		smp := len(h) - 1
 		// length of each polyphase filter in this stage
 		K := len(h) / I
 		// find polyphase filter in the FIR filter
@@ -582,8 +667,8 @@ func (src *Src) convertSampleRate() error {
 			for i = pf; i < I; i += D {
 				sum := 0.0
 				// perform convolution using polyphase filter and input y[prev]
-				for j := 0; j < K; j++ {
-					sum += h[i+j*D] * src.y[prev][smp-j]
+				for j := range K {
+					sum += h[i+j*I] * src.y[prev][smp-j]
 				}
 				src.y[cur][smp] = sum
 			}
@@ -592,10 +677,13 @@ func (src *Src) convertSampleRate() error {
 		} // this stage is done
 		// swap the input and output buffers
 		cur, prev = prev, cur
+		// next stage processes this stages's I/D factor of nsamples
 		nsamples = int(float64(nsamples) * float64(I) / float64(D))
 	}
 	// copy the last stage output to convSpeech for uses elsewhere
 	copy(src.convSpeech, src.y[src.stages%2])
+
+	fmt.Println("create new wav file for converted sample rate")
 
 	// Create new wav file: save convSpeech to disk
 	outF, err := os.Create(path.Join(dataDir, speechConvWav))
@@ -605,10 +693,11 @@ func (src *Src) convertSampleRate() error {
 	}
 	defer outF.Close()
 	// create wav.Encoder
-	enc := wav.NewEncoder(outF, sampleRate*src.upsample/src.downsample, bitDepth, 1, 1)
+	newSR := sampleRate * src.upsample / src.downsample
+	enc := wav.NewEncoder(outF, newSR, bitDepth, 1, 1)
 
 	// create audio.FloatBuffer
-	float64Buf := &audio.FloatBuffer{Data: src.convSpeech, Format: &audio.Format{NumChannels: 1, SampleRate: sampleRate}}
+	float64Buf := &audio.FloatBuffer{Data: src.convSpeech, Format: &audio.Format{NumChannels: 1, SampleRate: newSR}}
 
 	// create IntBuffer from FloatBuffer and pass to Encoder.Write()
 	if err := enc.Write(float64Buf.AsIntBuffer()); err != nil {
@@ -708,7 +797,7 @@ func handleTestingSrc(w http.ResponseWriter, r *http.Request) {
 	}
 	src.speech = bufInt.AsFloatBuffer().Data
 	src.nsamples = nsamples
-	src.convSpeech = make([]float64, int(float64(src.nsamples)*float64(src.upsample)/float64(src.downsample)))
+	fmt.Printf("nsamples = %d\n", src.nsamples)
 
 	// Determine if Sampling Rate Converter processing is wanted
 	sampleRateConvert := r.FormValue("src")
@@ -733,9 +822,11 @@ func handleTestingSrc(w http.ResponseWriter, r *http.Request) {
 	}
 
 	file := speechTestWav
-	if len(src.domain) > 0 {
+	if src.convSampleRate {
 		file = speechConvWav
 	}
+
+	fmt.Printf("process domain %s\n", src.domain)
 
 	if src.domain == "spectrogram" {
 		src.plot.Domain = "Spectrogram (Hz/sec)"
@@ -769,6 +860,18 @@ func handleTestingSrc(w http.ResponseWriter, r *http.Request) {
 		}
 		plot.Status = fmt.Sprintf("Time Domain of %s plotted.", filepath.Join(dataDir, file))
 	}
+
+	interStr := make([]string, src.stages)
+	for i, val := range src.inter {
+		interStr[i] = strconv.Itoa(val)
+	}
+	plot.UpsampleOrder = fmt.Sprintf("Upsample: %s", strings.Join(interStr, "->"))
+
+	deciStr := make([]string, src.stages)
+	for i, val := range src.deci {
+		deciStr[i] = strconv.Itoa(val)
+	}
+	plot.DownsampleOrder = fmt.Sprintf("Downsample: %s", strings.Join(deciStr, "->"))
 
 	// Play the audio wav if fmedia is available in the PATH environment variable
 	fmedia, err := exec.LookPath("fmedia.exe")
@@ -828,7 +931,7 @@ func (src *Src) processTimeDomain(filename string) error {
 	// time starts at 0 and ends at #samples*sampling period
 	endpoints.xmin = 0.0
 	// #samples*sampling period, sampling period = 1/sampleRate
-	endpoints.xmax = float64(src.nsamples) / float64(sampleRate*src.upsample/src.downsample)
+	endpoints.xmax = float64(src.nsamples*src.upsample/src.downsample) / float64(sampleRate*src.upsample/src.downsample)
 
 	// EP means endpoints
 	lenEPx := endpoints.xmax - endpoints.xmin
@@ -846,7 +949,7 @@ func (src *Src) processTimeDomain(filename string) error {
 	src.plot.Grid[row*cols+col] = "online"
 
 	// Store the amplitude in the plot Grid
-	for n := 1; n < src.nsamples; n++ {
+	for n := 1; n < src.nsamples*src.upsample/src.downsample; n++ {
 		// Current time
 		currTime := float64(n) / float64(sampleRate*src.upsample/src.downsample)
 
@@ -953,7 +1056,7 @@ func (src *Src) processSpectrogram(filename, fftWindow string, fftSize int) erro
 
 	// x-axis is time or sample, y-axis is frequency
 	endpoints.xmin = 0.0
-	endpoints.xmax = float64(src.nsamples)
+	endpoints.xmax = float64(src.nsamples * src.upsample / src.downsample)
 	endpoints.ymin = 0.0
 	endpoints.ymax = float64(fftSize2) // equivalent to Nyquist critical frequency
 
@@ -963,7 +1066,7 @@ func (src *Src) processSpectrogram(filename, fftWindow string, fftSize int) erro
 
 	// number of cells to interpolate in time and frequency
 	// round up so the cells in the plot grid are connected
-	ncellst := int((math.Ceil(float64(cols) * float64(fftSize2) / float64(src.nsamples))))
+	ncellst := int((math.Ceil(float64(cols) * float64(fftSize2) / float64(src.nsamples*src.upsample/src.downsample))))
 	ncellsf := int(math.Ceil(float64(rows) / float64(fftSize2)))
 
 	stepTime := float64((fftSize2) / ncellst)
@@ -984,13 +1087,10 @@ func (src *Src) processSpectrogram(filename, fftWindow string, fftSize int) erro
 
 	// for loop over samples, increment by fftSize/2, calculatePSD on the batch
 	// Overlap by 50% due to non-rectangular window to avoid Gibbs phenomenon
-	for smpl := 0; smpl < src.nsamples; smpl += fftSize2 {
+	for smpl := 0; smpl < src.nsamples*src.upsample/src.downsample; smpl += fftSize2 {
 		if !src.wordsOnly || src.inBoundsSample(smpl, fftSize2) {
 			// calculate the PSD using Bartlett's or Welch's variant of the Periodogram
-			end := smpl + fftSize
-			if end > src.nsamples {
-				end = src.nsamples
-			}
+			end := min(smpl+fftSize, src.nsamples*src.upsample/src.downsample)
 			_, psdMax, err := src.calculatePSD(data[smpl:end], PSD, fftWindow, fftSize)
 			if err != nil {
 				fmt.Printf("calculatePSD error: %v\n", err)
@@ -1041,7 +1141,7 @@ func (src *Src) processSpectrogram(filename, fftWindow string, fftSize int) erro
 	}
 
 	// Construct x-axis labels
-	incr := (endpoints.xmax - endpoints.xmin) / float64((xlabels - 1) * (sampleRate*src.upsample/src.downsample))
+	incr := (endpoints.xmax - endpoints.xmin) / float64((xlabels-1)*(sampleRate*src.upsample/src.downsample))
 	x := endpoints.xmin / float64(sampleRate*src.upsample/src.downsample)
 	// First label is empty for alignment purposes
 	for i := range src.plot.Xlabel {
