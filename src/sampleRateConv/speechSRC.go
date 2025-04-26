@@ -555,6 +555,23 @@ func (src *Src) findFactors() error {
 		return fmt.Errorf("decimator or interpolator not factorable into prime numbers")
 	}
 
+	// check for complete factorization of I and D
+	product := 1
+	for i := range src.deci {
+		product *= src.deci[i]
+	}
+	if product != D {
+		return fmt.Errorf("decimator %d not factorable into prime numbers, remainder is %d", D, D/product)
+	}
+
+	product = 1
+	for i := range src.inter {
+		product *= src.inter[i]
+	}
+	if product != I {
+		return fmt.Errorf("interpolator %d not factorable into prime numbers, remainder is %d", I, I/product)
+	}
+
 	// find the number of stages
 	src.stages = max(len(src.inter), len(src.deci))
 	fmt.Printf("number of stages = %d\n", src.stages)
