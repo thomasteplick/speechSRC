@@ -466,7 +466,7 @@ func (src *Src) orderStages() error {
 	}
 
 	// order the decimator (downsample) factors
-	if src.uporder == "ascending" {
+	if src.downorder == "ascending" {
 		for i := 0; i < src.stages-1; i++ {
 			for j := src.stages - 1; j > i; j-- {
 				if src.deci[j] < src.deci[j-1] {
@@ -567,6 +567,12 @@ func (src *Src) findFactors() error {
 		src.inter = append(src.inter, 1)
 	}
 
+	// order the upsample/downsample stages
+	if err := src.orderStages(); err != nil {
+		fmt.Printf("findFactors error: %v\n", err.Error())
+		return fmt.Errorf("orderStagew error: %v", err.Error())
+	}
+
 	// find storage factor sf that is the amount of memory needed for
 	// storing the stages input and output
 	src.sf = float64(src.nsamples)
@@ -618,12 +624,6 @@ func (src *Src) convertSampleRate() error {
 	if err != nil {
 		fmt.Printf("findFactors error: %v\n", err.Error())
 		return fmt.Errorf("findFactors error: %v", err.Error())
-	}
-
-	// order the upsample/downsample stages
-	if err = src.orderStages(); err != nil {
-		fmt.Printf("findFactors error: %v\n", err.Error())
-		return fmt.Errorf("orderStagew error: %v", err.Error())
 	}
 
 	fmt.Printf("inter = %v, deci = %v\n", src.inter, src.deci)

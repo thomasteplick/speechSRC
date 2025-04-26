@@ -297,18 +297,19 @@
 								Upsample:
 								<input type="radio" name="uporder" value="ascending" id="uporderascending" />
 								<label for="uporderascending">ascending</label>
-								<input type="radio" name="uporder" value="descending" id="uporderdescending" selected />
+								<input type="radio" name="uporder" value="descending" id="uporderdescending" checked />
 								<label for="uporderdescending">descending</label>
+								<br />
+							</span>
+							<span>
 								Downsample:
-								<input type="radio" name="\downorder" value="ascending" id="downorderascending" selected/>
+								<input type="radio" name="downorder" value="ascending" id="downorderascending" checked />
 								<label for="downorderascending">ascending</label>
 								<input type="radio" name="downorder" value="descending" id="downorderdescending" />
 								<label for="downorderdescending">descending</label>
 							</span>
 							<br />
-							<textarea name="stageorder" id="stageorder" readonly>
-								{{.UpsampleOrder}}
-								{{.DownsampleOrder}}
+							<textarea name="stageorder" id="stageorder" rows="1" cols="100" readonly>{{.UpsampleOrder}} {{.DownsampleOrder}}
 							</textarea>
 							<br />
 						</div>
