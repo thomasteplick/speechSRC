@@ -700,7 +700,26 @@ func (src *Src) convertSampleRate() error {
 	// copy the last stage output to convSpeech for uses elsewhere
 	copy(src.convSpeech, src.y[src.stages%2])
 
-	fmt.Println("create new wav file for converted sample rate")
+	// set converted speech amplitude to input speech
+	maxSpeech := -math.MaxFloat64
+	for _, val := range src.speech {
+		if math.Abs(val) > maxSpeech {
+			maxSpeech = math.Abs(val)
+		}
+	}
+
+	maxConverted := -math.MaxFloat64
+	for _, val := range src.convSpeech {
+		if math.Abs(val) > maxConverted {
+			maxConverted = math.Abs(val)
+		}
+	}
+	K := maxSpeech / maxConverted
+	for i := range src.convSpeech {
+		src.convSpeech[i] *= K
+	}
+
+	fmt.Printf("K = %.3f, create new wav file for converted sample rate", K)
 
 	// Create new wav file: save convSpeech to disk
 	outF, err := os.Create(path.Join(dataDir, speechConvWav))
