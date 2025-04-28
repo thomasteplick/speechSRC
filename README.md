@@ -76,5 +76,5 @@ range 69-99.  The FIR filter transition bandwidth is .05pi
 ![image](https://github.com/user-attachments/assets/8d9e8ce2-a00a-460c-9afa-ca886d5ae112)
 <h4>Time Domain Speech, "Make America Great Again, Upsample=9, Downsample=8, converted</h4>
 ![image](https://github.com/user-attachments/assets/b019cd64-b56f-4faf-b38f-f0c71a05be83)
-<h4>Spectrogram, "Make America Great Again", converted, words only</h4>
+<h4>Spectrogram, "Make America Great Again", Upsample=9, Downsample=8, converted, words only</h4>
 ![image](https://github.com/user-attachments/assets/8701f848-0669-4326-aee4-78397d21d28d)
