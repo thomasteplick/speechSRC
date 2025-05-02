@@ -69,7 +69,8 @@ the pi/5 FIR filter.  The FIR filters are in the data/ folder and were created w
 design method or Remez exchange algorithm.  The filters are modest with stopbands at -40dB to -50dB and the orders in the
 range 69-99.  The FIR filter transition bandwidth is .05pi
 </p>
-
+<h4>Multistage Samplihg Rate Conversion Configuration</h4>
+![samplerateconversion](https://github.com/user-attachments/assets/bd3e40bb-8da8-41fc-9681-74391ea598f5)
 <h4>Time Domain Speech, "Make America Great Again", original</h4>
 ![image](https://github.com/user-attachments/assets/c9e580d7-2b3c-41c7-aeb1-208e6e5a2503)
 <h4>Spectrogram, "Make America Great Again", original, words only</h4>
